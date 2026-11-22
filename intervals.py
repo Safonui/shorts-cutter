@@ -21,7 +21,7 @@ __all__ = [
     "ParseError", "Clip", "Issue", "INTERVAL_HINT", "TIMECODE_HINT",
     "parse_timecode", "parse_interval", "format_timecode", "format_duration",
     "clip_label", "validate_clips", "clips_total_duration", "issues_summary",
-    "split_into_chunks", "MIN_TAIL_SECONDS",
+    "split_into_chunks", "split_by_length", "parse_clip_length", "MIN_TAIL_SECONDS",
 ]
 
 INTERVAL_HINT = "Форматы: 1:23-2:45, 01:23:45-01:25:00, 00:10 - 00:30"
@@ -174,6 +174,65 @@ def split_into_chunks(duration: float, chunk_length: float,
         clips.append(Clip(start=round(start, 3), end=round(end, 3)))
         start = end
     return clips
+
+
+# --- «Разделить по длине» -----------------------------------------------------
+
+def split_by_length(duration: float, length: float,
+                    min_tail: float = MIN_TAIL_SECONDS) -> list[Clip]:
+    """Разбить видео на отрезки заданной длины (кнопка «Разделить по длине»).
+
+    Отличие от `split_into_chunks`: видео размечается целиком. Последний отрезок —
+    остаток какой угодно длины; если он короче min_tail, он присоединяется к
+    предыдущему отрезку, а не выбрасывается.
+
+    Пример: видео 20:40 (1240 с) по 300 с → 0–300, 300–600, 600–900, 900–1240.
+    """
+    if duration <= 0 or length <= 0:
+        return []
+    clips: list[Clip] = []
+    start = 0.0
+    while start < duration - 0.05:
+        end = min(start + length, duration)
+        clips.append(Clip(start=round(start, 3), end=round(end, 3)))
+        start = end
+
+    # Короткий остаток сливаем с предыдущим отрезком: отдельный обрезок в 1–2
+    # секунды для публикации бесполезен, а терять его нельзя.
+    if len(clips) >= 2 and clips[-1].duration < min_tail - 0.001:
+        tail = clips.pop()
+        previous = clips[-1]
+        clips[-1] = Clip(start=previous.start, end=tail.end)
+    return clips
+
+
+def parse_clip_length(text: str, duration: float | None = None) -> int:
+    """Проверить «длину клипа» для кнопки «Разделить по длине».
+
+    Требования: целое положительное число секунд, не больше длительности видео.
+    Возвращает длину в секундах; при ошибке бросает ParseError с понятным текстом.
+    """
+    raw = (text or "").strip()
+    value = raw.replace(",", ".")
+    if not value:
+        raise ParseError("Укажите длину клипа в секундах, например 300.")
+    if value.startswith(("-", "−", "–", "—")):
+        raise ParseError("Длина клипа должна быть больше нуля.")
+    if not _NUMBER_RE.match(value):
+        raise ParseError(f"«{raw}» — это не число. Укажите длину клипа целым "
+                         "числом секунд, например 300.")
+    number = float(value)
+    if number != int(number):
+        raise ParseError(f"«{raw}» — не целое число. Длина клипа задаётся целым "
+                         "числом секунд, например 300.")
+    seconds = int(number)
+    if seconds <= 0:
+        raise ParseError("Длина клипа должна быть больше нуля.")
+    if duration is not None and seconds > duration + BOUNDS_TOLERANCE:
+        raise ParseError(f"Длина клипа ({seconds} с) больше самого видео "
+                         f"({format_duration(duration)}). Укажите число не больше "
+                         "длительности видео.")
+    return seconds
 
 
 # --- Проверка интервалов ------------------------------------------------------

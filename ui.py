@@ -30,8 +30,8 @@ from highlights import (HighlightCancelled, HighlightError, HighlightSettings,
                        find_highlights)
 from intervals import (INTERVAL_HINT, Clip, ParseError, TIMECODE_HINT,
                        clips_total_duration, format_duration, format_timecode,
-                       issues_summary, parse_interval, parse_timecode,
-                       split_into_chunks, validate_clips)
+                       issues_summary, parse_clip_length, parse_interval, parse_timecode,
+                       split_by_length, split_into_chunks, validate_clips)
 from subtitles import (SubtitleStyle, SubtitleTask, estimate_seconds, is_available,
                        make_work_dir, unavailable_reason)
 from taskbar import TaskbarProgress
@@ -375,9 +375,26 @@ class ShortsCutterApp(tk.Tk):
         ttk.Label(controls, textvariable=self.var_clips_summary,
                   style="ValueMono.TLabel").pack(side="right")
 
+        # --- «Разделить по длине»: интервалы по всей длине видео ----------------
+        split_line = ttk.Frame(inner, style="Panel.TFrame")
+        split_line.grid(row=4, column=0, sticky="ew", pady=(10, 0))
+        ttk.Label(split_line, text="Длина клипа, сек:", style="Panel.TLabel").pack(side="left")
+        self.spin_split_len = ttk.Spinbox(split_line, from_=1, to=86400, width=7,
+                                          textvariable=self.var_split_len)
+        self.spin_split_len.pack(side="left", padx=(8, 8))
+        self.button_split = ttk.Button(split_line, text="Разделить по длине",
+                                       command=self._on_split_by_length)
+        self.button_split.pack(side="left")
+        Tooltip(self.button_split,
+                "Разбить видео на отрезки заданной длины и заполнить список интервалов.\n"
+                "Список создаётся заново: текущие интервалы заменяются.\n"
+                "Остаток в конце короче 5 секунд присоединяется к предыдущему отрезку.")
+        Tooltip(self.spin_split_len,
+                "Длина одного отрезка в секундах — целое число, не больше длительности видео")
+
         # --- «Нарезать подряд»: равные клипы по всему видео --------------------
         chunk_line = ttk.Frame(inner, style="Panel.TFrame")
-        chunk_line.grid(row=4, column=0, sticky="ew", pady=(10, 0))
+        chunk_line.grid(row=5, column=0, sticky="ew", pady=(10, 0))
         ttk.Label(chunk_line, text="Нарезать подряд — длина клипа, сек:",
                   style="Panel.TLabel").pack(side="left")
         self.spin_chunk = ttk.Spinbox(chunk_line, from_=5, to=3600, width=6,
@@ -392,7 +409,7 @@ class ShortsCutterApp(tk.Tk):
 
         # --- поиск ярких моментов по звуку (расширение сверх ТЗ) ---------------
         highlight_line = ttk.Frame(inner, style="Panel.TFrame")
-        highlight_line.grid(row=5, column=0, sticky="ew", pady=(6, 0))
+        highlight_line.grid(row=6, column=0, sticky="ew", pady=(6, 0))
         ttk.Label(highlight_line, text="Найти яркие моменты — сколько клипов:",
                   style="Panel.TLabel").pack(side="left")
         self.spin_highlight = ttk.Spinbox(highlight_line, from_=1, to=20, width=4,
@@ -408,7 +425,7 @@ class ShortsCutterApp(tk.Tk):
         Tooltip(self.spin_highlight, "Сколько ярких моментов искать (1–20)")
 
         ttk.Label(inner, text=f"{INTERVAL_HINT}. Пробелы допустимы, форматы можно смешивать.",
-                  style="HintPanel.TLabel").grid(row=6, column=0, sticky="w", pady=(8, 0))
+                  style="HintPanel.TLabel").grid(row=7, column=0, sticky="w", pady=(8, 0))
 
     def _build_export_section(self) -> None:
         inner = self._make_section(3, "3 · Параметры экспорта", COLORS["neon_cyan_dim"])
@@ -442,11 +459,12 @@ class ShortsCutterApp(tk.Tk):
         self.var_crf = tk.StringVar(value=str(saved.get("crf")))
         self.var_output_dir = tk.StringVar(value=str(saved.get("output_dir") or ""))
         self.var_chunk_len = tk.StringVar(value=str(saved.get("chunk_len")))
+        self.var_split_len = tk.StringVar(value=str(saved.get("split_len")))
         self.var_highlight_count = tk.StringVar(value=str(saved.get("highlight_count")))
         for variable in (self.var_format, self.var_face_detect, self.var_subtitles,
                          self.var_font_size, self.var_sub_position, self.var_sub_color,
                          self.var_crf, self.var_output_dir, self.var_chunk_len,
-                         self.var_highlight_count):
+                         self.var_split_len, self.var_highlight_count):
             variable.trace_add("write", lambda *_args: (self._update_export_summary(),
                                                         self._schedule_save()))
 
@@ -802,6 +820,44 @@ class ShortsCutterApp(tk.Tk):
             f"всего в списке {len(self.clips)}.")
         log.info("«Нарезать подряд»: %d клипов по %.1f с (%s)",
                  len(clips), chunk, action)
+
+    def _on_split_by_length(self) -> None:
+        """«Разделить по длине»: заполнить список интервалов по длине отрезка."""
+        if self.video_info is None:
+            show_message(self, "Видео не выбрано",
+                         "Сначала выберите видеофайл, тогда его можно будет разделить "
+                         "по длине.")
+            return
+
+        duration = self.video_info.duration
+        try:
+            length = parse_clip_length(self.var_split_len.get(), duration)
+        except ParseError as exc:
+            show_error(self, "Неверная длина клипа", str(exc))
+            return
+
+        if not duration or duration <= 0:
+            show_error(self, "Длительность видео неизвестна",
+                       "Не удалось прочитать длительность видео, поэтому разделить его "
+                       "по длине нельзя. Выберите файл заново.")
+            return
+
+        clips = split_by_length(duration, float(length))
+        if not clips:
+            show_message(self, "Разделить не удалось",
+                         "Не получилось разделить видео на отрезки: проверьте длину "
+                         "клипа и длительность видео.")
+            return
+
+        # Кнопка создаёт список заново — так и написано в подсказке к ней.
+        self.clips = clips
+        self._validate(mark_rows=True)
+        self._refresh_clip_list(select_index=0)
+        self._update_action_buttons()
+        self._set_status(
+            f"«Разделить по длине»: клипов {len(clips)} по {format_duration(length)}; "
+            f"всего в списке {len(self.clips)}.")
+        log.info("«Разделить по длине»: %d клипов по %d с", len(clips), length)
 
     def _on_find_highlights(self) -> None:
         """Найти яркие моменты по звуку (расширение сверх ТЗ)."""
@@ -1245,7 +1301,8 @@ class ShortsCutterApp(tk.Tk):
         for widget in (self.button_cut, self.button_choose, self.button_add_interval,
                        self.button_add_current, self.button_check, self.button_delete,
                        self.button_clear, self.button_settings, self.button_chunk,
-                       self.button_highlights, self.spin_chunk, self.spin_highlight):
+                       self.button_highlights, self.button_split,
+                       self.spin_chunk, self.spin_highlight, self.spin_split_len):
             if busy:
                 widget.state(["disabled"])
             else:

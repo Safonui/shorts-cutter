@@ -255,6 +255,52 @@ app.clips, app.video_info = _saved_clips, None      # поддельное ви�
 app._validate(mark_rows=True)
 app._update_action_buttons()
 
+# --- «Разделить по длине» --------------------------------------------------------
+check("поле «Длина клипа, сек» заполнено значением по умолчанию",
+      app.var_split_len.get().strip() == "300", app.var_split_len.get())
+check("кнопка «Разделить по длине» есть и активна",
+      "disabled" not in app.button_split.state())
+
+_saved_clips, _saved_info = app.clips, app.video_info
+app.clips = []
+app.video_info = type("Info", (), {"duration": 1240.0, "path": Path("видео.mp4")})()
+app.var_split_len.set("300")
+app._on_split_by_length()
+check("«Разделить по длине» разбило 20:40 по 300 с", len(app.clips) == 5,
+      f"клипов: {len(app.clips)}")
+check("интервалы идут от начала до конца без пропусков",
+      app.clips[0].start == 0.0 and abs(app.clips[-1].end - 1240.0) < 0.01,
+      f"{app.clips[0].start}…{app.clips[-1].end}")
+check("остаток 40 с остался отдельным отрезком",
+      abs(app.clips[-1].duration - 40.0) < 0.01, str(app.clips[-1].duration))
+check("таблица показывает столько же строк, сколько клипов",
+      len(app.tree.get_children()) == 5, str(len(app.tree.get_children())))
+
+app.var_split_len.set("300,5")
+app.after(150, _close_top_levels)                 # закрыть сообщение об ошибке
+app._on_split_by_length()
+check("дробная длина не принимается", len(app.clips) == 5, f"клипов: {len(app.clips)}")
+
+app.var_split_len.set("2000")
+app.after(150, _close_top_levels)
+app._on_split_by_length()
+check("длина больше видео не принимается", len(app.clips) == 5, f"клипов: {len(app.clips)}")
+
+app.var_split_len.set("60")
+app._on_split_by_length()                          # без диалогов: список пересоздаётся
+check("повторное нажатие пересоздаёт список заново", len(app.clips) == 21,
+      f"клипов: {len(app.clips)}")
+
+app.video_info = None
+app.after(150, _close_top_levels)
+app._on_split_by_length()
+check("без видео «Разделить по длине» ничего не делает", len(app.clips) == 21,
+      f"клипов: {len(app.clips)}")
+
+app.clips, app.video_info = _saved_clips, None     # поддельное видео убираем
+app._validate(mark_rows=True)
+app._update_action_buttons()
+
 # --- поиск ярких моментов (расширение сверх ТЗ) ----------------------------------
 check("кнопка «Найти яркие моменты» есть и активна",
       "disabled" not in app.button_highlights.state())

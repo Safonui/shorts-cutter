@@ -76,28 +76,33 @@ def write_version_file(path: Path) -> None:
 
 
 def remove_tree(path: Path, attempts: int = 4, pause: float = 0.25) -> None:
-    """Убрать каталог сборки, сняв атрибут «только чтение».
+    """Убрать каталог или файл прошлой сборки, сняв атрибут «только чтение».
 
-    В папках OneDrive у каталогов стоит атрибут «только чтение», и обычное
-    удаление отвечает «отказано в доступе» (WinError 5). Раньше ошибку глушил
+    В папках OneDrive у каталогов стоит атрибут «только чтение», и удаление
+    отвечает «отказано в доступе» (WinError 5). Раньше ошибку глушил
     ignore_errors, каталог оставался — и PyInstaller обрывался на нём с
     PermissionError вместо того, чтобы собрать программу.
     """
-    if not path.exists():
+    target = Path(path)
+    if not target.exists():
         return
     for attempt in range(1, attempts + 1):
         if attempt > 1:
-            for item in [path, *path.rglob("*")]:
+            items = [target, *target.rglob("*")] if target.is_dir() else [target]
+            for item in items:
                 try:
                     os.chmod(item, stat.S_IWRITE)
                 except OSError:
                     pass
         try:
-            shutil.rmtree(path)
+            if target.is_dir():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
             return
         except OSError as exc:
             if attempt == attempts:
-                print(f"  каталог {path} удалить не удалось: {exc}")
+                print(f"  {target} удалить не удалось: {exc}")
                 return
             time.sleep(pause)
 
@@ -107,6 +112,10 @@ def build(with_subtitles: bool, onedir: bool = False, console: bool = False,
     check_pyinstaller()
     remove_tree(BUILD)
     DIST.mkdir(exist_ok=True)
+    # Папку (или файл) прошлой сборки убираем сами: PyInstaller не умеет снимать
+    # атрибут «только чтение», который OneDrive ставит на каталоги, и падает на
+    # очистке _internal с PermissionError.
+    remove_tree(DIST / name if onedir else DIST / f"{name}.exe")
     version_file = BUILD / "version_info.txt"
     write_version_file(version_file)
 

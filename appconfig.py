@@ -35,6 +35,7 @@ SETTING_DEFAULTS: dict[str, object] = {
     "output_dir": "",
     "output_dir_custom": False,
     "chunk_len": "60",
+    "split_len": "300",
     "highlight_count": "5",
     "subtitles": 0,
     "font_size": "48",
