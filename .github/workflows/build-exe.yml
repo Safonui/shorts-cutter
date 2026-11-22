@@ -1,0 +1,167 @@
+name: Сборка .exe для Windows
+
+# Зачем этот файл
+# ───────────────
+# Он собирает «Нарезку Shorts» в один портативный .exe на чистой виртуальной
+# машине GitHub (windows-latest). Там нет ни Smart App Control, ни повреждённого
+# хранилища компонентов Windows — поэтому сборка получается рабочей, даже если
+# на домашнем компьютере .exe не запускается.
+#
+# Как пользоваться
+# ────────────────
+# 1. Ручной запуск: вкладка Actions → «Сборка .exe для Windows» → Run workflow.
+#    Через 5–10 минут готовый файл лежит внизу страницы запуска, в разделе
+#    Artifacts (скачается zip-архивом).
+# 2. Автоматически: любой push в main/master, а также push тега вида v1.0.0.
+#    По тегу .exe дополнительно прикладывается к «Releases» — оттуда его можно
+#    скачать обычной ссылкой и раздать кому угодно.
+#
+# Полный вариант с распознаванием речи (faster-whisper) включается галочкой
+# «Собрать с распознаванием речи» при ручном запуске: файл вырастает
+# с ~49 МБ до ~600 МБ, зато субтитры работают без установки Python.
+
+on:
+  workflow_dispatch:
+    inputs:
+      with_subtitles:
+        description: 'Собрать с распознаванием речи (faster-whisper, ~600 МБ вместо ~49 МБ)'
+        type: boolean
+        default: false
+
+  push:
+    branches: [main, master]
+    tags: ['v*']
+
+permissions:
+  contents: write        # нужно, чтобы приложить .exe к релизу по тегу
+
+env:
+  # Русский текст в отчётах .exe и в подписях Python не должен падать
+  # на консоли Windows с её кодировкой по умолчанию.
+  PYTHONIOENCODING: utf-8
+
+jobs:
+  # ── 1. Тесты: если они падают, .exe не собираем ───────────────────────────
+  tests:
+    name: Тесты и самопроверка
+    runs-on: windows-latest
+    steps:
+      - name: Забрать код
+        uses: actions/checkout@v4
+
+      - name: Поставить Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Установить зависимости
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Юнит-тесты (python main.py --selftest)
+        run: python main.py --selftest
+
+      # smoke_ui.py открывает настоящее окно Tk: на виртуальной машине это
+      # обычно работает, но сбой этой проверки не должен отменять сборку .exe.
+      - name: Проверка окна (необязательная)
+        continue-on-error: true
+        run: python tests/smoke_ui.py
+
+  # ── 2. Сборка одного .exe ─────────────────────────────────────────────────
+  build:
+    name: Портативный .exe
+    needs: tests
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Забрать код
+        uses: actions/checkout@v4
+
+      - name: Поставить Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Установить зависимости для сборки
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+
+      # build_exe.py кладёт внутрь .exe tkinter, Tcl/Tk и ffmpeg из
+      # imageio-ffmpeg, поэтому пользователю ничего доустанавливать не нужно.
+      - name: Собрать .exe
+        run: python build_exe.py ${{ inputs.with_subtitles && '--with-subtitles' || '' }}
+
+      # Сборка считается удачной только если файл реально запускается и
+      # находит ffmpeg (--check возвращает 0 именно в этом случае).
+      - name: Проверить, что .exe запускается (--check)
+        shell: python
+        run: |
+          import glob, subprocess, sys
+          exes = glob.glob("dist/*.exe")
+          if len(exes) != 1:
+              sys.exit("ожидался ровно один файл в dist, найдено: %s" % exes)
+          exe = exes[0]
+          result = subprocess.run([exe, "--check"], capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace")
+          print(result.stdout or result.stderr)
+          print("exit code:", result.returncode)
+          sys.exit(result.returncode)
+
+      - name: Показать размер файла
+        shell: python
+        run: |
+          import glob, os
+          for path in glob.glob("dist/*.exe"):
+              print("%s — %.1f МБ" % (path, os.path.getsize(path) / 1e6))
+
+      - name: Выложить .exe в артефакты
+        uses: actions/upload-artifact@v4
+        with:
+          name: narezka-shorts-exe-${{ inputs.with_subtitles && 'with-subtitles' || 'no-subtitles' }}
+          path: dist/*.exe
+          if-no-files-found: error
+          compression-level: 0        # .exe внутри уже сжат, лишний проход не нужен
+          retention-days: 30
+
+  # ── 3. Релиз: только при push тега вида v1.0.0 ────────────────────────────
+  release:
+    name: Релиз по тегу
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Забрать собранный .exe
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Показать, что скачали
+        run: find artifacts -name '*.exe' -exec ls -lh {} \;
+
+      - name: Приложить .exe к релизу
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Имя файла содержит пробел («Нарезка Shorts.exe»), поэтому читаем
+          # список в массив: без кавычек bash разбил бы имя на два аргумента.
+          mapfile -t EXES < <(find artifacts -name '*.exe' -print)
+          if [ ${#EXES[@]} -eq 0 ]; then
+            echo "Собранных .exe не найдено — сначала должна пройти сборка."
+            exit 1
+          fi
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${EXES[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${EXES[@]}" \
+              --title "Нарезка Shorts $GITHUB_REF_NAME" \
+              --generate-notes
+          fi
+
+      - name: Ссылка на релиз
+        run: echo "${{ github.server_url }}/${{ github.repository }}/releases/tag/$GITHUB_REF_NAME"

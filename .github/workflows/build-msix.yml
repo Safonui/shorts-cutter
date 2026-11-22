@@ -1,0 +1,70 @@
+name: Сборка MSIX для Microsoft Store
+
+# Зачем этот файл: инструмент Microsoft makeappx не запускается на компьютере,
+# где повреждён распространяемый пакет Visual C++. На чистом компьютере
+# (виртуальная машина GitHub) всё работает, поэтому пакет для Store можно
+# собирать здесь одной кнопкой — без установки чего-либо у себя.
+#
+# Запускается ТОЛЬКО вручную: пакету нужен издатель из Partner Center, а по
+# тегам версии теперь собирается обычный .exe — см. build-exe.yml.
+
+on:
+  workflow_dispatch:        # запуск вручную из вкладки Actions → Run workflow
+    inputs:
+      publisher:
+        description: 'Издатель из Partner Center, например CN=Иван Иванов'
+        required: true
+        default: 'CN=Placeholder'
+
+jobs:
+  build-msix:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Установить зависимости
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pillow pyinstaller
+
+      - name: Проверить код тестами
+        run: |
+          python main.py --selftest
+          python tests/smoke_ui.py
+
+      - name: Нарисовать иконку и графику Store
+        run: python make_icon.py
+
+      - name: Собрать пакет MSIX
+        env:
+          PUBLISHER: ${{ github.event.inputs.publisher || 'CN=Placeholder' }}
+        run: python make_store_package.py --publisher "$env:PUBLISHER"
+
+      - name: Проверить пакет
+        run: |
+          Get-ChildItem store/dist/*.msix | Format-List Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: msix-package
+          path: store/dist/*.msix
+          if-no-files-found: error
+
+      # Заодно прикладываем переносимый .exe и файл-лаунчер — на случай,
+      # если пакет Store пока не нужен. Если нужен только .exe, этот workflow
+      # запускать не обязательно: он есть в build-exe.yml.
+      - name: Собрать .exe и лаунчер
+        run: |
+          python build_exe.py
+          python make_launcher.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: portable-builds
+          path: |
+            dist/*.exe
+            Нарезка Shorts.cmd
