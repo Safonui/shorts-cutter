@@ -16,9 +16,12 @@ onnxruntime и av, из-за чего сборка вырастает с ~40 М�
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
+import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -72,10 +75,37 @@ def write_version_file(path: Path) -> None:
     print(f"  ресурсы версии: {path.name} ({APP_NAME} {APP_VERSION})")
 
 
+def remove_tree(path: Path, attempts: int = 4, pause: float = 0.25) -> None:
+    """Убрать каталог сборки, сняв атрибут «только чтение».
+
+    В папках OneDrive у каталогов стоит атрибут «только чтение», и обычное
+    удаление отвечает «отказано в доступе» (WinError 5). Раньше ошибку глушил
+    ignore_errors, каталог оставался — и PyInstaller обрывался на нём с
+    PermissionError вместо того, чтобы собрать программу.
+    """
+    if not path.exists():
+        return
+    for attempt in range(1, attempts + 1):
+        if attempt > 1:
+            for item in [path, *path.rglob("*")]:
+                try:
+                    os.chmod(item, stat.S_IWRITE)
+                except OSError:
+                    pass
+        try:
+            shutil.rmtree(path)
+            return
+        except OSError as exc:
+            if attempt == attempts:
+                print(f"  каталог {path} удалить не удалось: {exc}")
+                return
+            time.sleep(pause)
+
+
 def build(with_subtitles: bool, onedir: bool = False, console: bool = False,
           name: str = APP_NAME) -> int:
     check_pyinstaller()
-    shutil.rmtree(BUILD, ignore_errors=True)
+    remove_tree(BUILD)
     DIST.mkdir(exist_ok=True)
     version_file = BUILD / "version_info.txt"
     write_version_file(version_file)
