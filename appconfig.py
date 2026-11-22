@@ -23,7 +23,7 @@ __all__ = ["APP_NAME", "APP_VERSION", "APP_PUBLISHER", "APP_YEAR", "SETTING_DEFA
 log = logging.getLogger("shorts")
 
 APP_NAME = "Нарезка Shorts"
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 APP_PUBLISHER = "Нарезка Shorts"
 APP_YEAR = "2026"
 APP_ID = "ShortsCutter"
