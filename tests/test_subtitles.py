@@ -236,5 +236,65 @@ class TestAudioReading(unittest.TestCase):
             shutil.rmtree(folder, ignore_errors=True)
 
 
+class TestRecognitionUsesArray(unittest.TestCase):
+    """Регрессия: модель должна получать массив, а не путь к файлу.
+
+    Если передать faster-whisper путь, он декодирует звук через PyAV, а в
+    av 19 (PyAV 19) параметр metadata_errors убран — распознавание падает с
+    TypeError: open() got an unexpected keyword argument 'metadata_errors'.
+    Поэтому приложение читает WAV само (read_wav_mono) и отдаёт массив.
+    """
+
+    class _FakeModel:
+        """Заглушка модели: запоминает, что именно ей передали."""
+
+        def __init__(self):
+            self.audio = None
+            self.kwargs: dict = {}
+
+        def transcribe(self, audio, **kwargs):
+            self.audio = audio
+            self.kwargs = kwargs
+            return [], None            # ни одного сегмента — субтитров не будет
+
+    def test_model_gets_array_with_vad(self):
+        try:
+            import numpy
+        except ImportError:
+            self.skipTest("numpy не установлен (появляется вместе с faster-whisper)")
+        import struct
+        import wave
+        from unittest import mock
+
+        folder = make_temp_folder("recognition")
+        model = self._FakeModel()
+        clip = type("Clip", (), {"start": 0.0, "duration": 0.1})()
+        info = VideoInfo(path=folder / "a.mp4", duration=10, width=640, height=360,
+                         fps=30, has_audio=True)
+        task = SubtitleTask(info, folder / "work", SubtitleStyle())
+
+        def fake_extract(_info, _start, _duration, target):
+            """Вместо ffmpeg пишем готовый WAV туда, куда его ждёт приложение."""
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with wave.open(str(target), "wb") as handle:
+                handle.setnchannels(1)
+                handle.setsampwidth(2)
+                handle.setframerate(16000)
+                handle.writeframes(struct.pack("<1600h", *([1000] * 1600)))
+            return target
+
+        try:
+            with mock.patch.object(subtitles, "is_available", return_value=True), \
+                    mock.patch.object(subtitles, "_load_model", return_value=model), \
+                    mock.patch.object(subtitles, "extract_audio", side_effect=fake_extract):
+                result = task.filter_for(0, clip)
+            self.assertIsNone(result)
+            self.assertIsInstance(model.audio, numpy.ndarray)      # массив, а не путь
+            self.assertTrue(model.kwargs.get("vad_filter"))
+            self.assertEqual(model.kwargs.get("beam_size"), 5)
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
