@@ -33,7 +33,7 @@ from intervals import (INTERVAL_HINT, Clip, ParseError, TIMECODE_HINT,
                        issues_summary, parse_interval, parse_timecode,
                        split_into_chunks, validate_clips)
 from subtitles import (SubtitleStyle, SubtitleTask, estimate_seconds, is_available,
-                       unavailable_reason)
+                       make_work_dir, unavailable_reason)
 from taskbar import TaskbarProgress
 from theme import (COLORS, FONTS, Tooltip, apply_dark_titlebar, apply_theme,
                    draw_hero_backdrop, make_hud_panel, track_dark_titlebar)
@@ -1105,7 +1105,7 @@ class ShortsCutterApp(tk.Tk):
             self._subtitle_task = None
             return None
 
-        self._subtitle_task = SubtitleTask(self.video_info, output_dir / "_subs",
+        self._subtitle_task = SubtitleTask(self.video_info, make_work_dir(output_dir),
                                            self._subtitle_style(),
                                            on_event=self._on_cut_event)
         return self._subtitle_task

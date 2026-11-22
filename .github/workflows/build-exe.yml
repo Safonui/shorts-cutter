@@ -65,6 +65,13 @@ jobs:
       - name: Юнит-тесты (python main.py --selftest)
         run: python main.py --selftest
 
+      # Проверяем в обычной среде (не в песочнице), что временная папка
+      # субтитров создаётся и убирается: раньше она лежала в папке вывода,
+      # и в OneDrive удаление падало с «отказано в доступе».
+      - name: Временная папка субтитров создаётся и удаляется
+        run: |
+          python -c "import subtitles; w = subtitles.make_work_dir('.'); print('создана:', w); assert w.is_dir(); w.rmdir(); assert not w.exists(); print('удалена — ок')"
+
       # smoke_ui.py открывает настоящее окно Tk: на виртуальной машине это
       # обычно работает, но сбой этой проверки не должен отменять сборку.
       - name: Проверка окна (необязательная)
@@ -265,14 +272,25 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          # Имена содержат пробелы и кириллицу («Нарезка Shorts.exe»), поэтому
-          # читаем список в массив: без кавычек bash разбил бы имя на аргументы.
-          mapfile -t FILES < <(find artifacts -type f \( -name '*.exe' -o -name '*.zip' \) -print)
+          # GitHub вырезает кириллицу из имён файлов релиза: «Нарезка Shorts.exe»
+          # превращалось в «Shorts.exe», а «Нарезка-Shorts-с-субтитрами.zip» —
+          # в «-Shorts-.-.zip» (проверено и через gh, и через API с именем в URL,
+          # так что это поведение GitHub, а не нашего скрипта). Поэтому к релизу
+          # прикладываем копии с латинскими именами; внутри zip имя файла
+          # остаётся прежним — «Нарезка Shorts.exe».
+          mkdir -p release
+          while IFS= read -r file; do
+            case "$file" in
+              *.exe) cp "$file" release/Narezka-Shorts.exe ;;
+              *.zip) cp "$file" release/Narezka-Shorts-with-subtitles.zip ;;
+            esac
+          done < <(find artifacts -type f \( -name '*.exe' -o -name '*.zip' \) -print)
+          mapfile -t FILES < <(find release -type f -print)
           if [ ${#FILES[@]} -eq 0 ]; then
             echo "Собранных файлов не найдено — сначала должна пройти сборка."
             exit 1
           fi
-          printf 'к релизу: %s\n' "${FILES[@]}"
+          ls -lh release
           if gh release view "$GITHUB_REF_NAME" --repo "$GH_REPO" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "${FILES[@]}" --repo "$GH_REPO" --clobber
           else

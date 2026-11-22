@@ -20,6 +20,7 @@ from subtitles import (SubtitleStyle, SubtitleTask, SubtitleUnavailable,  # noqa
                        ass_color, build_srt, estimate_seconds, force_style,
                        format_timestamp, is_available, read_wav_mono,
                        subtitle_filter, unavailable_reason, write_srt)
+from tests import remove_tree  # noqa: E402
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -266,6 +267,41 @@ class TestAudioReading(unittest.TestCase):
             self.assertAlmostEqual(float(data[0]), 2000 / 32768, places=5)
         finally:
             shutil.rmtree(folder, ignore_errors=True)
+
+
+class TestWorkDir(unittest.TestCase):
+    """Временные файлы субтитров лежат вне папки вывода.
+
+    Папка вывода у многих в OneDrive, где каталог держит синхронизация и пустая
+    папка `_subs` оставалась рядом с готовыми клипами.
+    """
+
+    def test_work_dir_outside_output(self):
+        output = make_temp_folder("workdir_out")
+        work = None
+        try:
+            work = subtitles.make_work_dir(output)
+            self.assertTrue(work.is_dir(), work)
+            self.assertFalse(str(work).startswith(str(output)),
+                             f"временная папка не должна быть внутри папки вывода: {work}")
+        finally:
+            if work is not None:
+                remove_tree(work)
+            remove_tree(output)
+
+    def test_fallback_when_temp_unavailable(self):
+        """Если системный temp недоступен, папка создаётся рядом с клипами."""
+        from unittest import mock
+
+        output = make_temp_folder("workdir_fallback")
+        try:
+            with mock.patch.object(subtitles.tempfile, "mkdtemp",
+                                   side_effect=OSError("temp недоступен")):
+                work = subtitles.make_work_dir(output)
+            self.assertEqual(work, output / "_subs")
+            self.assertTrue(work.is_dir())
+        finally:
+            remove_tree(output)
 
 
 class TestRecognitionUsesArray(unittest.TestCase):

@@ -25,6 +25,7 @@ import os
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,7 +37,7 @@ __all__ = [
     "SubtitleError", "SubtitleUnavailable", "SubtitleStyle", "SubtitleTask",
     "MODEL_SIZE", "is_available", "unavailable_reason", "estimate_seconds",
     "format_timestamp", "build_srt", "write_srt", "ass_color", "force_style",
-    "subtitle_filter",
+    "subtitle_filter", "read_wav_mono", "make_work_dir",
 ]
 
 log = logging.getLogger("shorts")
@@ -268,6 +269,30 @@ def read_wav_mono(path: Path):
     if channels > 1:
         data = data.reshape(-1, channels).mean(axis=1)
     return data
+
+
+def make_work_dir(output_dir: Path | str | None = None) -> Path:
+    """Папка для временных .wav и .srt: системный temp, а не папка вывода.
+
+    Так надёжнее и чище. В папке вывода (а она у многих лежит в OneDrive)
+    каталог держит синхронизация: удаление пустой папки отвечает «отказано в
+    доступе» даже через 19 секунд повторов, и рядом с готовыми клипами оставался
+    мусор `_subs`. В системном temp такой борьбы нет, и временный звук
+    (десятки мегабайт) не уезжает в облако вместе с клипами.
+
+    Если системный temp недоступен, возвращаемся к прежнему поведению —
+    подпапка `_subs` рядом с клипами.
+    """
+    try:
+        return Path(tempfile.mkdtemp(prefix="narezka-subs-"))
+    except OSError as exc:
+        log.warning("Системный temp недоступен (%s) — временные файлы субтитров "
+                    "будут лежать рядом с клипами", exc)
+        if output_dir is None:
+            raise
+        fallback = Path(output_dir) / "_subs"
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
 
 
 class SubtitleTask:

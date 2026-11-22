@@ -63,6 +63,19 @@ class TestCropScaleFilter(unittest.TestCase):
         text = crop_scale_filter(make_info(1080, 1920), CutSettings())
         self.assertEqual(text.split(",")[0], "crop=1080:1920:0:0")
 
+    def test_square_pixels_for_vertical(self):
+        """После кропа выставляем квадратные пиксели.
+
+        Кроп округляется до чётного (для 640×360 это 202×360), поэтому без
+        setsar=1 соотношение сторон выходит 0,5611 вместо ровного 9:16 = 0,5625,
+        и плееры показывают кадр 1077×1920 вместо 1080×1920.
+        """
+        text = crop_scale_filter(make_info(640, 360), CutSettings())
+        self.assertTrue(text.endswith("setsar=1"), text)
+        self.assertIn("scale=1080:1920", text)
+        width, height = (int(v) for v in text.split(",")[0][5:].split(":")[:2])
+        self.assertAlmostEqual(width / height, 9 / 16, places=2)
+
     def test_keep_as_is(self):
         settings = CutSettings(vertical=False)
         self.assertIsNone(crop_scale_filter(make_info(1920, 1080), settings))

@@ -335,8 +335,12 @@ def crop_scale_filter(info: VideoInfo, settings: CutSettings) -> str | None:
     crop_height -= crop_height % 2
     x = max(0, (info.width - crop_width) // 2)
     y = max(0, (info.height - crop_height) // 2)
+    # setsar=1 — квадратные пиксели. Кроп округляется до чётного (бывает 202×360),
+    # и без этого плеер считает соотношение сторон не 9:16, а чуть иным
+    # (например, 1077×1920): картинку это не портит, но формат должен быть ровным.
     return (f"crop={crop_width}:{crop_height}:{x}:{y},"
-            f"scale={settings.target_width}:{settings.target_height}:flags=lanczos")
+            f"scale={settings.target_width}:{settings.target_height}:flags=lanczos,"
+            "setsar=1")
 
 
 def build_cut_command(info: VideoInfo, start: float, duration: float, output: Path,
