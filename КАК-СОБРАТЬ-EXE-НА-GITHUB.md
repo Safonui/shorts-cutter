@@ -52,8 +52,11 @@
 2. **Token name**: `shorts-cutter-upload`.
 3. **Expiration**: 90 дней (потом можно выпустить новый).
 4. **Repository access** → *Only select repositories* → выберите `shorts-cutter`.
-5. **Permissions** → *Repository permissions* → **Contents** → *Read and write*.
-   Больше ничего не нужно.
+5. **Permissions** → *Repository permissions*:
+   - **Contents** → *Read and write*
+   - **Workflows** → *Read and write* — обязательно: в проекте есть файлы
+     `.github/workflows/`, а без этого права GitHub не даст их записать (проверено
+     на практике: с одним лишь Contents запись отклоняется).
 6. **Generate token** и скопируйте значение вида `github_pat_…` (показывается один раз).
 
 ### Шаг 3. Загрузите проект
@@ -187,6 +190,26 @@ git push origin v1.0.1
 ```
 
 ---
+
+## Если токен отказывает в записи (403)
+
+Скрипт проверяет это до загрузки и сам печатает, какого права не хватает: GitHub
+сообщает его в заголовке ответа. Нужны **все три** вещи:
+
+| Что | Где в настройках токена | Признак, что забыли |
+| --- | --- | --- |
+| Репозиторий добавлен в доступ | **Repository access** → *Only select repositories* → сам репозиторий | `403`, хотя репозиторий «открывается»: публичный репозиторий читается кем угодно и без прав, это сбивает с толку |
+| **Contents: Read and write** | Repository permissions → Contents | `403`, в ответе `contents=write` |
+| **Workflows: Read and write** | Repository permissions → Workflows | `403` при записи `.github/workflows/*.yml` |
+
+Меняйте права в том же токене (Edit → Save changes) — значение остаётся прежним,
+выпускать новый не нужно.
+
+**Пустой репозиторий — это нормально.** Пока в репозитории нет ни одного коммита,
+GitHub отказывает всему Git Data API: даже создание файла отвечает
+`409 Git Repository is empty`. Скрипт обходит это сам — делает служебный первый
+коммит через Contents API, после чего заливает проект обычным путём. Служебный
+файл `.gitkeep` в итоговом состоянии репозитория не остаётся.
 
 ## Что делать, если что-то не так
 
