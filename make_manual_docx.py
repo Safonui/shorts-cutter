@@ -180,7 +180,7 @@ def build() -> int:
 
     footer = document.add_paragraph()
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = footer.add_run("Нарезка Shorts 1.0.3 — руководство пользователя")
+    run = footer.add_run("Нарезка Shorts 1.0.4 — руководство пользователя")
     run.font.size = Pt(9)
     run.font.color.rgb = MUTED
 

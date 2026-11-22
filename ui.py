@@ -73,7 +73,7 @@ class ShortsCutterApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
 
-        self.title(f"{APP_NAME} — вертикальные клипы из длинного видео")
+        self.title(f"{APP_NAME} {APP_VERSION} — вертикальные клипы из длинного видео")
         self.geometry("1140x870")
         self.minsize(1020, 810)
         apply_theme(self)
@@ -203,11 +203,64 @@ class ShortsCutterApp(tk.Tk):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(2, weight=1)
         self._build_header()
+        self._build_scroll_area()
         self._build_video_section()
         self._build_clips_section()
         self._build_export_section()
         self._build_action_bar()
         self._build_status_bar()
+
+    def _build_scroll_area(self) -> None:
+        """Прокручиваемая область для разделов 1–3.
+
+        Зачем: целиком окно не помещается на невысоких экранах (например
+        1536×864 — содержимое просит около 1150 px). Раньше раздел клипов
+        сжимался, а его нижние строки оказывались вне рамки раздела и на Windows
+        просто обрезались: кнопки «Проверить интервалы», «Нарезать подряд»,
+        «Найти яркие моменты» и новая «Разделить по длине» были недоступны.
+        Теперь разделы живут в прокручиваемой области, а шапка, панель действий
+        с «Нарезать» и строка состояния остаются на месте.
+        """
+        holder = ttk.Frame(self, style="TFrame")
+        holder.grid(row=2, column=0, sticky="nsew")
+        holder.columnconfigure(0, weight=1)
+        holder.rowconfigure(0, weight=1)
+
+        self.scroll_canvas = tk.Canvas(holder, background=COLORS["bg"],
+                                       highlightthickness=0, borderwidth=0, bd=0)
+        self.scroll_canvas.grid(row=0, column=0, sticky="nsew")
+        self.scroll_bar = ttk.Scrollbar(holder, orient="vertical",
+                                        command=self.scroll_canvas.yview)
+        self.scroll_bar.grid(row=0, column=1, sticky="ns")
+        self.scroll_canvas.configure(yscrollcommand=self.scroll_bar.set)
+
+        self.scroll_body = ttk.Frame(self.scroll_canvas, style="TFrame")
+        self.scroll_body.columnconfigure(0, weight=1)
+        self._scroll_window = self.scroll_canvas.create_window(
+            (0, 0), window=self.scroll_body, anchor="nw")
+        self.scroll_body.bind("<Configure>", self._on_scroll_body)
+        self.scroll_canvas.bind("<Configure>", self._on_scroll_viewport)
+        # Колесо мыши: событие с любого элемента внутри окна доходит до окна,
+        # поэтому отдельные привязки к каждой панели не нужны.
+        self.bind("<MouseWheel>", self._on_mouse_wheel)
+
+    def _on_scroll_body(self, _event: tk.Event | None = None) -> None:
+        """Разделы выросли или сжались — пересчитать область прокрутки."""
+        self.scroll_canvas.configure(scrollregion=self.scroll_canvas.bbox("all"))
+
+    def _on_scroll_viewport(self, event: tk.Event) -> None:
+        """Ширина разделов всегда равна ширине видимой области."""
+        self.scroll_canvas.itemconfigure(self._scroll_window, width=event.width)
+
+    def _on_mouse_wheel(self, event: tk.Event) -> None:
+        """Прокрутка колесом, но только если содержимое выше окна."""
+        region = self.scroll_canvas.bbox("all")
+        if not region:
+            return
+        if region[3] - region[1] <= self.scroll_canvas.winfo_height():
+            return
+        step = -1 if getattr(event, "delta", 0) > 0 else 1
+        self.scroll_canvas.yview_scroll(step, "units")
 
     def _build_header(self) -> None:
         """Шапка-«герой»: градиент со свечением, как на референсе."""
@@ -243,8 +296,9 @@ class ShortsCutterApp(tk.Tk):
         """Заголовок секции капсом + HUD-панель в неоновой рамке.
 
         Возвращает внутреннюю рамку панели — в неё секция и рисует своё содержимое.
+        Разделы живут в прокручиваемой области (см. `_build_scroll_area`).
         """
-        holder = ttk.Frame(self, style="TFrame")
+        holder = ttk.Frame(self.scroll_body, style="TFrame")
         holder.grid(row=row, column=0, sticky="nsew" if weight_row else "ew",
                     padx=18, pady=pady)
         holder.columnconfigure(0, weight=1)
@@ -297,7 +351,7 @@ class ShortsCutterApp(tk.Tk):
                                    weight_row=True)
         # Строка таблицы растягивается, но не сжимается меньше четырёх строк —
         # иначе при небольшом окне таблица клипов становится невидимой.
-        inner.rowconfigure(2, weight=1, minsize=140)
+        inner.rowconfigure(3, weight=1, minsize=140)
 
         # --- строковый ввод интервала ---------------------------------------
         line_one = ttk.Frame(inner, style="Panel.TFrame")
@@ -330,9 +384,27 @@ class ShortsCutterApp(tk.Tk):
         Tooltip(self.entry_end, TIMECODE_HINT)
         Tooltip(self.button_add_current, "Взять интервал из полей «Начало» и «Конец»")
 
+        # --- «Разделить по длине»: интервалы по всей длине видео ----------------
+        # Строка стоит над списком: на невысоких экранах её видно без прокрутки.
+        split_line = ttk.Frame(inner, style="Panel.TFrame")
+        split_line.grid(row=2, column=0, sticky="ew", pady=(4, 10))
+        ttk.Label(split_line, text="Длина клипа, сек:", style="Panel.TLabel").pack(side="left")
+        self.spin_split_len = ttk.Spinbox(split_line, from_=1, to=86400, width=7,
+                                          textvariable=self.var_split_len)
+        self.spin_split_len.pack(side="left", padx=(8, 8))
+        self.button_split = ttk.Button(split_line, text="Разделить по длине",
+                                       command=self._on_split_by_length)
+        self.button_split.pack(side="left")
+        Tooltip(self.button_split,
+                "Разбить видео на отрезки заданной длины и заполнить список интервалов.\n"
+                "Список создаётся заново: текущие интервалы заменяются.\n"
+                "Остаток в конце короче 5 секунд присоединяется к предыдущему отрезку.")
+        Tooltip(self.spin_split_len,
+                "Длина одного отрезка в секундах — целое число, не больше длительности видео")
+
         # --- таблица клипов --------------------------------------------------
         table = ttk.Frame(inner, style="Panel.TFrame")
-        table.grid(row=2, column=0, sticky="nsew")
+        table.grid(row=3, column=0, sticky="nsew")
         table.columnconfigure(0, weight=1)
         table.rowconfigure(0, weight=1)
 
@@ -357,7 +429,7 @@ class ShortsCutterApp(tk.Tk):
 
         # --- кнопки работы со списком ---------------------------------------
         controls = ttk.Frame(inner, style="Panel.TFrame")
-        controls.grid(row=3, column=0, sticky="ew", pady=(10, 0))
+        controls.grid(row=4, column=0, sticky="ew", pady=(10, 0))
         self.button_check = ttk.Button(controls, text="Проверить интервалы",
                                        command=self._on_check_intervals)
         self.button_check.pack(side="left")
@@ -374,23 +446,6 @@ class ShortsCutterApp(tk.Tk):
         self.var_clips_summary = tk.StringVar(value="Клипов: 0")
         ttk.Label(controls, textvariable=self.var_clips_summary,
                   style="ValueMono.TLabel").pack(side="right")
-
-        # --- «Разделить по длине»: интервалы по всей длине видео ----------------
-        split_line = ttk.Frame(inner, style="Panel.TFrame")
-        split_line.grid(row=4, column=0, sticky="ew", pady=(10, 0))
-        ttk.Label(split_line, text="Длина клипа, сек:", style="Panel.TLabel").pack(side="left")
-        self.spin_split_len = ttk.Spinbox(split_line, from_=1, to=86400, width=7,
-                                          textvariable=self.var_split_len)
-        self.spin_split_len.pack(side="left", padx=(8, 8))
-        self.button_split = ttk.Button(split_line, text="Разделить по длине",
-                                       command=self._on_split_by_length)
-        self.button_split.pack(side="left")
-        Tooltip(self.button_split,
-                "Разбить видео на отрезки заданной длины и заполнить список интервалов.\n"
-                "Список создаётся заново: текущие интервалы заменяются.\n"
-                "Остаток в конце короче 5 секунд присоединяется к предыдущему отрезку.")
-        Tooltip(self.spin_split_len,
-                "Длина одного отрезка в секундах — целое число, не больше длительности видео")
 
         # --- «Нарезать подряд»: равные клипы по всему видео --------------------
         chunk_line = ttk.Frame(inner, style="Panel.TFrame")

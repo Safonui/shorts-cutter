@@ -29,6 +29,15 @@ from ui import ShortsCutterApp  # noqa: E402
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
+# Настройки изолируем: иначе проверка читает и перезаписывает настоящий файл
+# пользователя (%APPDATA%\ShortsCutter\settings.json), и её результат зависит от
+# того, что он выставил в приложении (например, включённые субтитры).
+_appdata_root = PROJECT_ROOT / "_tmp_smoke_appdata"
+shutil.rmtree(_appdata_root, ignore_errors=True)
+(_appdata_root / "Roaming").mkdir(parents=True, exist_ok=True)
+os.environ["APPDATA"] = str(_appdata_root / "Roaming")
+os.environ["LOCALAPPDATA"] = str(_appdata_root / "Local")
+
 checks: list[str] = []
 
 
@@ -402,10 +411,36 @@ check("шрифт Segoe UI", "Segoe UI" in str(style.lookup("TLabel", "font")),
       str(style.lookup("TLabel", "font")))
 check("тема ttk clam", style.theme_use() == "clam", style.theme_use())
 
+# --- достижимость элементов раздела клипов (вёрстка на невысоких экранах) -------
+# Раньше раздел клипов сжимался, и его нижние строки оказывались вне рамки
+# раздела: на Windows они обрезались, и кнопки «Проверить интервалы»,
+# «Нарезать подряд», «Найти яркие моменты» были недоступны. Теперь разделы живут
+# в прокручиваемой области и сохраняют свою высоту, поэтому каждый элемент должен
+# помещаться внутри своего раздела.
+def _inside_section(widget) -> bool:
+    parent = widget.master
+    if widget.winfo_height() <= 1 or parent.winfo_height() <= 1:
+        return False
+    bottom = widget.winfo_rooty() - parent.winfo_rooty() + widget.winfo_height()
+    return bottom <= parent.winfo_height() + 1
+
+
+app.update()
+clips_controls = [app.spin_split_len, app.button_split, app.button_check,
+                  app.button_delete, app.button_chunk, app.button_highlights]
+outside = [str(w) for w in clips_controls if not _inside_section(w)]
+check("элементы раздела клипов не выходят за рамку раздела",
+      not outside, str(outside))
+
+region = app.scroll_canvas.bbox("all")
+check("разделы лежат в прокручиваемой области и не сжимаются",
+      bool(region) and region[3] >= 600, str(region))
+
 # --- незакрытые модальные окна не остались --------------------------------------
 check("нет висящих диалогов", not any(isinstance(w, tk.Toplevel) for w in app.winfo_children()))
 
 app.destroy()
+shutil.rmtree(_appdata_root, ignore_errors=True)
 
 print("\n".join(checks))
 failed = [line for line in checks if line.startswith("FAIL")]

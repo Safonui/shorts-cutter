@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from pathlib import Path
 
 __all__ = ["APP_NAME", "APP_VERSION", "APP_PUBLISHER", "APP_YEAR", "SETTING_DEFAULTS",
@@ -23,7 +24,7 @@ __all__ = ["APP_NAME", "APP_VERSION", "APP_PUBLISHER", "APP_YEAR", "SETTING_DEFA
 log = logging.getLogger("shorts")
 
 APP_NAME = "Нарезка Shorts"
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.4"
 APP_PUBLISHER = "Нарезка Shorts"
 APP_YEAR = "2026"
 APP_ID = "ShortsCutter"
@@ -77,18 +78,27 @@ def load_settings() -> dict:
 
 
 def save_settings(values: dict) -> bool:
-    """Записать настройки (только известные ключи). Тихий отказ при ошибке."""
+    """Записать настройки (только известные ключи). Тихий отказ при ошибке.
+
+    Запись идёт «через замену»: сначала временный файл, потом переименование.
+    Если система ненадолго заняла файл (антивирус, синхронизация), пробуем ещё
+    раз — иначе настройки молча не сохранятся.
+    """
     payload = {key: values[key] for key in SETTING_DEFAULTS if key in values}
     path = config_path()
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp = path.with_suffix(".json.tmp")
-        temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        temp.replace(path)               # запись «через замену»: файл не побьётся
-        return True
-    except OSError as exc:
-        log.warning("Не удалось сохранить настройки (%s): %s", path, exc)
-        return False
+    for attempt in (1, 2):
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temp = path.with_suffix(".json.tmp")
+            temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            temp.replace(path)               # запись «через замену»: файл не побьётся
+            return True
+        except OSError as exc:
+            if attempt == 2:
+                log.warning("Не удалось сохранить настройки (%s): %s", path, exc)
+                return False
+            time.sleep(0.2)
+    return False
 
 
 def reset_settings() -> bool:
