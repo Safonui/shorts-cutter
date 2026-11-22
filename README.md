@@ -514,6 +514,7 @@ GitHub Actions (файл workflow готов), либо после `DISM /Online
 | `make_launcher.py` | сборка одного файла `Нарезка Shorts.cmd` |
 | `make_icon.py` | рисование иконки и графики Microsoft Store |
 | `make_store_package.py` | сборка пакета MSIX для Microsoft Store |
+| `make_manual_docx.py` | сборка `КАК-ПОЛЬЗОВАТЬСЯ.docx` из markdown (нужен `pip install python-docx`) |
 | `installer.iss` | скрипт установщика для Inno Setup |
 | `tests/test_intervals.py` | тесты парсера, проверки интервалов и разбиения |
 | `tests/test_cutting.py` | тесты кропа, команды ffmpeg и имён файлов |
