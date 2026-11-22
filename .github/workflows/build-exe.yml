@@ -246,6 +246,12 @@ jobs:
     needs: [build-light, build-subtitles]
     runs-on: ubuntu-latest
     steps:
+      # gh (GitHub CLI) ругается «fatal: not a git repository», если рядом нет
+      # локального репозитория — поэтому код забираем и здесь, а репозиторий
+      # дополнительно задаём через GH_REPO.
+      - name: Забрать код
+        uses: actions/checkout@v4
+
       - name: Забрать собранные файлы
         uses: actions/download-artifact@v4
         with:
@@ -257,6 +263,7 @@ jobs:
       - name: Приложить файлы к релизу
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           # Имена содержат пробелы и кириллицу («Нарезка Shorts.exe»), поэтому
           # читаем список в массив: без кавычек bash разбил бы имя на аргументы.
@@ -266,10 +273,10 @@ jobs:
             exit 1
           fi
           printf 'к релизу: %s\n' "${FILES[@]}"
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "${FILES[@]}" --clobber
+          if gh release view "$GITHUB_REF_NAME" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${FILES[@]}" --repo "$GH_REPO" --clobber
           else
-            gh release create "$GITHUB_REF_NAME" "${FILES[@]}" \
+            gh release create "$GITHUB_REF_NAME" "${FILES[@]}" --repo "$GH_REPO" \
               --title "Нарезка Shorts $GITHUB_REF_NAME" \
               --generate-notes
           fi

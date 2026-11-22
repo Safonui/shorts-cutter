@@ -171,6 +171,38 @@ class TestAvailability(unittest.TestCase):
         finally:
             shutil.rmtree(folder, ignore_errors=True)
 
+    def test_cleanup_removes_readonly_work_dir(self):
+        """Пустая рабочая папка убирается и с атрибутом «только чтение».
+
+        Так помечает каталоги OneDrive, и тогда обычное удаление отвечает
+        «отказано в доступе» (WinError 5) — из-за этого после нарезки в папке
+        вывода оставалась пустая папка _subs.
+        """
+        import os
+        import stat
+
+        folder = make_temp_folder("cleanup_readonly")
+        work = folder / "work"
+        work.mkdir()
+        info = VideoInfo(path=folder / "a.mp4", duration=10, width=640, height=360,
+                         fps=30, has_audio=True)
+        task = SubtitleTask(info, work, SubtitleStyle())
+        wav = work / "clip_01.wav"
+        wav.write_bytes(b"x")
+        task._created += [wav]
+        os.chmod(work, stat.S_IREAD)              # атрибут «только чтение»
+        try:
+            task.cleanup()
+            self.assertFalse(wav.exists())
+            self.assertFalse(work.exists(),
+                             "пустая рабочая папка должна удаляться и с этим атрибутом")
+        finally:
+            try:
+                os.chmod(work, stat.S_IWRITE)
+            except OSError:
+                pass
+            shutil.rmtree(folder, ignore_errors=True)
+
 
 class TestLocalModel(unittest.TestCase):
     """Готовая модель ищется рядом с программой (офлайн, без повторной загрузки)."""

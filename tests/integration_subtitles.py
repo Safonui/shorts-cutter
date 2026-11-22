@@ -13,7 +13,6 @@ Pillow не требуется.
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 import threading
@@ -24,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from cutting import ClipCutter, CutSettings, ffmpeg_exe, probe_video  # noqa: E402
 from intervals import Clip  # noqa: E402
 from subtitles import SubtitleStyle, subtitle_filter, write_srt  # noqa: E402
+from tests import remove_tree  # noqa: E402
 
 HERE = Path(__file__).resolve().parents[1]
 WORK = HERE / "Видео тест"
@@ -116,7 +116,7 @@ def cut_with_subtitles(style: SubtitleStyle, suffix: str) -> Path:
 
 
 def main() -> int:
-    shutil.rmtree(OUTPUT, ignore_errors=True)
+    remove_tree(OUTPUT)
     make_source()
     write_srt(SEGMENTS, SRT)
     print(f"субтитры записаны: {SRT}")
@@ -183,7 +183,7 @@ def main() -> int:
     print("\n".join(CHECKS))
     failed = [line for line in CHECKS if line.startswith("FAIL")]
     print(f"\nИтого: {len(CHECKS) - len(failed)}/{len(CHECKS)} проверок пройдено")
-    shutil.rmtree(OUTPUT, ignore_errors=True)
+    remove_tree(OUTPUT)
     SOURCE.unlink(missing_ok=True)
     SRT.unlink(missing_ok=True)
     return 1 if failed else 0

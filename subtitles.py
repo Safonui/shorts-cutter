@@ -21,9 +21,11 @@ from __future__ import annotations
 
 import importlib.util
 import logging
-import shutil
+import os
+import stat
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
@@ -340,12 +342,42 @@ class SubtitleTask:
         return subtitle_filter(srt, self.style)
 
     def cleanup(self) -> None:
-        """Удалить временные .wav и .srt."""
+        """Удалить временные .wav и .srt вместе с рабочей папкой."""
         for path in self._created:
             try:
                 path.unlink(missing_ok=True)
             except OSError as exc:
                 log.warning("Не удалось удалить временный файл %s: %s", path, exc)
         self._created.clear()
-        if self.work_dir.exists() and not any(self.work_dir.iterdir()):
-            shutil.rmtree(self.work_dir, ignore_errors=True)
+        self._remove_work_dir()
+
+    def _remove_work_dir(self, attempts: int = 4, pause: float = 0.2) -> None:
+        """Убрать рабочую папку, если она опустела.
+
+        С первого раза может не выйти по двум причинам, и обе лечим:
+        * Windows иногда ещё держит каталог сразу после удаления файлов;
+        * в папках OneDrive у каталогов стоит атрибут «только чтение», и обычное
+          удаление отвечает «отказано в доступе» (WinError 5) — атрибут снимаем.
+        Раньше ошибка глушилась через ignore_errors, и пустая папка оставалась
+        в папке вывода навсегда — снаружи это выглядело как мусор после нарезки.
+
+        Удаляется только пустой каталог (`rmdir`): если внутри что-то есть,
+        это не наша папка, и трогать её нельзя.
+        """
+        for attempt in range(1, attempts + 1):
+            try:
+                if not self.work_dir.exists() or any(self.work_dir.iterdir()):
+                    return
+                self.work_dir.rmdir()
+                return
+            except OSError as exc:
+                if attempt == attempts:
+                    log.warning("Не удалось удалить временную папку %s: %s — "
+                                "в папке вывода останется пустой каталог",
+                                self.work_dir, exc)
+                    return
+                try:
+                    os.chmod(self.work_dir, stat.S_IWRITE)      # снять «только чтение»
+                except OSError:
+                    pass
+                time.sleep(pause)

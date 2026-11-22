@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 import threading
@@ -24,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from cutting import (ClipCutter, CutSettings, ffmpeg_exe,  # noqa: E402
                      probe_video)
 from intervals import Clip, format_duration  # noqa: E402
+from tests import remove_tree  # noqa: E402
 
 HERE = Path(__file__).resolve().parents[1]
 WORK = HERE / "Видео тест"
@@ -80,7 +80,7 @@ def run_cutter(clips: list, settings: CutSettings, cancel_after: float | None = 
 
 
 def main() -> int:
-    shutil.rmtree(OUTPUT, ignore_errors=True)
+    remove_tree(OUTPUT)
     make_source()
     info = probe_video(SOURCE)
     print(f"исходник: {info.duration:.2f} с, {info.resolution_text}, {info.fps_text} fps, "
@@ -147,7 +147,7 @@ def main() -> int:
         print("Готовые файлы:")
         for path in sorted(OUTPUT.glob("*.mp4")):
             print(f"  {path.name} — {format_duration(probe_video(path).duration)}")
-    shutil.rmtree(OUTPUT, ignore_errors=True)
+    remove_tree(OUTPUT)
     SOURCE.unlink(missing_ok=True)
     return 1 if failed else 0
 

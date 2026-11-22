@@ -11,7 +11,6 @@
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -22,6 +21,7 @@ from cutting import VideoInfo, ffmpeg_exe, probe_video  # noqa: E402
 from highlights import (HighlightError, HighlightSettings,  # noqa: E402
                         find_highlights)
 from intervals import format_timecode  # noqa: E402
+from tests import remove_tree  # noqa: E402
 
 HERE = Path(__file__).resolve().parents[1]
 WORK = HERE / "Видео тест" / "яркое"
@@ -71,7 +71,7 @@ def make_video() -> None:
 
 
 def main() -> int:
-    shutil.rmtree(WORK, ignore_errors=True)
+    remove_tree(WORK)
     make_video()
     info = probe_video(VIDEO)
     print(f"ролик: {info.duration:.2f} с, звук: {info.audio_text}; "
@@ -146,7 +146,7 @@ def main() -> int:
     print("\n".join(CHECKS))
     failed = [line for line in CHECKS if line.startswith("FAIL")]
     print(f"\nИтого: {len(CHECKS) - len(failed)} из {len(CHECKS)} проверок пройдено")
-    shutil.rmtree(WORK, ignore_errors=True)
+    remove_tree(WORK)
     return 1 if failed else 0
 
 
